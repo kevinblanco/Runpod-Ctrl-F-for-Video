@@ -1,0 +1,38 @@
+# secrets — never commit
+.env
+.env.*
+!.env.example
+*.key
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.python-version
+
+# flash build artifacts
+.flash/
+*.tar.gz
+
+# generated data
+index/
+frames/
+out/
+
+# python (from flash scaffold)
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+build/
+dist/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+AGENTS.md
+CLAUDE.md

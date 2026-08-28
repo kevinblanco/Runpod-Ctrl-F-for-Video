@@ -1,0 +1,164 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ctrl+F for Video</title>
+<style>
+  :root{
+    --bg:#0b0b0f; --panel:#15151c; --line:#26262f; --line2:#33333f;
+    --ink:#f4f4f6; --dim:#9a9aa8; --accent:#7c5cff; --accent-dim:#5b43c4;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Inter,sans-serif}
+  header{padding:24px 32px 18px;border-bottom:1px solid var(--line);
+         position:sticky;top:0;background:var(--bg);z-index:10}
+  .kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  h1{margin:5px 0 16px;font-size:23px;font-weight:600;letter-spacing:-.01em}
+  h1 em{font-style:normal;color:var(--accent)}
+
+  form{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  input[type=search]{flex:1;min-width:280px;padding:12px 15px;border-radius:9px;
+    border:1px solid var(--line2);background:var(--panel);color:var(--ink);font-size:15px}
+  input[type=search]:focus{outline:none;border-color:var(--accent)}
+  input[type=search]::placeholder{color:#6a6a78}
+  button{padding:12px 22px;border-radius:9px;border:0;background:var(--accent);
+    color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+  button:hover{background:var(--accent-dim)}
+  button:disabled{opacity:.5;cursor:default}
+
+  .status{margin-top:11px;font-size:13px;color:var(--dim);min-height:19px}
+  .status b{color:var(--ink);font-weight:600}
+  .status .err{color:#ff8095}
+
+  main{padding:22px 32px 60px;max-width:1300px}
+  video{width:100%;max-height:52vh;background:#000;border:1px solid var(--line);border-radius:10px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:13px;margin-top:20px}
+  .hit{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;
+       cursor:pointer;transition:border-color .15s,transform .15s}
+  .hit:hover{border-color:var(--accent);transform:translateY(-2px)}
+  .hit.on{border-color:var(--accent)}
+  .wrap{position:relative;line-height:0}
+  .hit img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#000}
+  .rank{position:absolute;top:8px;left:8px;padding:1px 7px;border-radius:20px;
+        background:rgba(11,11,15,.82);font-size:11px;color:var(--dim);line-height:1.6}
+  .row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 11px}
+  .ts{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+  .score{font-size:12px;color:var(--dim)}
+  .hint{color:var(--dim);padding:28px 0;font-size:14px}
+  .hint code{background:var(--panel);padding:2px 6px;border-radius:4px}
+</style>
+
+<header>
+  <div class="kicker">Runpod Flash · CLIP ViT-B/32</div>
+  <h1>Ctrl+F for <em>Video</em></h1>
+  <form id="f">
+    <input id="q" type="search" autofocus autocomplete="off"
+           placeholder="describe something you remember seeing…">
+    <button id="go" type="submit">Search</button>
+  </form>
+  <div class="status" id="status"></div>
+</header>
+
+<main>
+  <video id="v" controls playsinline preload="metadata"></video>
+  <div class="grid" id="grid"></div>
+  <div class="hint" id="hint">
+    Type what you remember seeing and hit Search. Every frame of the video was
+    embedded with CLIP on a Runpod GPU; your query gets embedded the same way and
+    matched against them.
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const grid = $('#grid'), statusEl = $('#status'), video = $('#v');
+let current = null;
+let index = null;
+
+function say(html, isErr) {
+  statusEl.innerHTML = isErr ? `<span class="err">${html}</span>` : html;
+}
+
+async function loadIndexes() {
+  try {
+    const r = await fetch('/api/indexes');
+    const d = await r.json();
+    if (!d.indexes || !d.indexes.length) {
+      say('No indexes yet — run <code>cli.py index &lt;video-url&gt;</code> first.', true);
+      return;
+    }
+    // No picker: use the largest index available. Still index-agnostic --
+    // point cli.py at a different video and this follows it.
+    index = d.indexes.reduce((a, b) => (b.frames > a.frames ? b : a));
+    setVideo(index.video_url);
+    say(`<b>${index.frames}</b> frames indexed and ready to search.`);
+  } catch (e) {
+    say('Cannot reach the local server. Start it with <code>python serve.py</code>.', true);
+  }
+}
+
+function setVideo(url) {
+  if (video.src !== url) { video.src = url; current = null; }
+}
+
+// Enter must submit. Implicit form submission is fussy across browsers with a
+// type=search input, and this is the one interaction a live demo cannot fumble.
+$('#q').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); doSearch(); }
+});
+$('#f').onsubmit = e => { e.preventDefault(); doSearch(); };
+
+async function doSearch() {
+  const query = $('#q').value.trim();
+  if (!query) return;
+  $('#go').disabled = true;
+  say('Embedding your query on a Runpod GPU…');
+  const t0 = performance.now();
+
+  try {
+    const r = await fetch('/api/search', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query, index: index && index.name, top: 12}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+
+    setVideo(d.video_url);
+    render(d);
+    say(`<b>${d.results.length}</b> best of <b>${d.frames_searched}</b> frames · ` +
+        `query embedded on ${d.where} in <b>${d.embed_ms} ms</b> · ` +
+        `similarity search <b>${d.search_us} µs</b> · ` +
+        `total ${Math.round(performance.now() - t0)} ms`);
+  } catch (err) {
+    grid.innerHTML = '';
+    say(String(err.message || err), true);
+  } finally {
+    $('#go').disabled = false;
+  }
+}
+
+function render(d) {
+  $('#hint').hidden = true;
+  grid.innerHTML = '';
+  for (const res of d.results) {
+    const el = document.createElement('div');
+    el.className = 'hit';
+    el.innerHTML =
+      `<div class="wrap"><span class="rank">${res.rank}</span>` +
+      `<img loading="lazy" src="${res.frame}" alt="frame at ${res.ts}"></div>` +
+      `<div class="row"><span class="ts">${res.ts}</span>` +
+      `<span class="score">${res.score.toFixed(3)}</span></div>`;
+    el.onclick = () => {
+      if (current) current.classList.remove('on');
+      el.classList.add('on'); current = el;
+      video.currentTime = res.t;
+      video.play().catch(() => {});
+      video.scrollIntoView({behavior: 'smooth', block: 'start'});
+    };
+    grid.appendChild(el);
+  }
+}
+
+loadIndexes();
+</script>

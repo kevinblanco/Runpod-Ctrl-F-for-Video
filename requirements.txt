@@ -1,0 +1,5 @@
+# Local orchestrator deps only. Remote worker deps are declared in
+# @Endpoint(dependencies=[...]) — see AGENTS.md.
+runpod-flash>=1.19.0
+numpy>=1.26
+python-dotenv>=1.0
