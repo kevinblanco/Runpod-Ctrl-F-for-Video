@@ -27,23 +27,7 @@ class Clip:
 
 
     def _as_embeddings(self, out, projection):
-        """Normalise what `get_*_features` handed back into a plain tensor.
 
-        transformers **5.x changed this return type**. In 4.x, `get_image_features`
-        and `get_text_features` return a tensor. In 5.15.1 -- which is what a worker
-        installs if you write `dependencies=["transformers"]` with no pin -- they
-        return a `BaseModelOutputWithPooling` whose `pooler_output` is *already the
-        projected embedding*:
-
-            last_hidden_state  (1, 50, 768)
-            pooler_output      (1, 512)   <- this is the embedding, projection_dim=512
-
-        So the length of the last dimension is what tells you whether to project.
-        Getting this wrong is nastier than a crash: on the text side, applying the
-        512->512 text_projection a second time produces unit-norm 512-dim vectors
-        that pass every shape and norm check while living in a different space from
-        the image vectors. Search silently returns garbage. See FRICTION.md #7.
-        """
         if hasattr(out, "shape"):                      
             return out
         for attr in ("text_embeds", "image_embeds"):   
@@ -84,17 +68,13 @@ class Clip:
                 feats = self._as_embeddings(
                     self.model.get_image_features(**inputs), self.model.visual_projection
                 )
-            # normalise so cosine similarity is a plain dot product downstream
             feats = feats / feats.norm(dim=-1, keepdim=True)
             vectors.extend(feats.cpu().tolist())
 
         return {"vectors": vectors, "count": len(vectors), "dim": len(vectors[0])}
 
     async def embed_text(self, input_data: dict) -> dict:
-        """Query strings in, vectors in the same space out.
 
-        input_data: {"texts": [str, ...]}
-        """
         texts = input_data.get("texts") or []
         if not texts:
             return {"error": "texts is required and must be non-empty"}
