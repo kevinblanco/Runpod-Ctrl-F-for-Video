@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# Source this before any flash command:  source bin/env.sh
-#
-# Two things bite on a fresh macOS box; both are documented in FRICTION.md.
-#
-# 1. The `flash` CLI is installed as a uv tool, which puts it in ~/.local/bin.
-# 2. uv's managed CPython ships no CA bundle — its compiled-in default points at
-#    a python.org path that does not exist, so every TLS call to api.runpod.io
-#    fails with CERTIFICATE_VERIFY_FAILED. flash surfaces that as a *worker*
-#    HTTP 500, which sends you debugging the wrong machine. certifi is already
-#    installed alongside flash; we just have to point OpenSSL at it.
 
 export PATH="$HOME/.local/bin:$PATH"
 
